@@ -4,8 +4,8 @@
 #include "hmm.h"
 #include <algorithm>
 #include <cstdlib>
+#include <fstream>
 #include <functional>
-#include <numeric>
 #include <vector>
 
 struct HiddenMarkovModel : HMM {
@@ -16,11 +16,12 @@ struct HiddenMarkovModel : HMM {
   }
 
   const int obs_len;
+  int seq_num;
+  std::vector<char> sequences;
   std::vector<double> accGamma, accEpsilon, accGammaObs, accGamma0;
   mutable std::vector<double> alpha, beta, gamma, epsilon, delta;
 
-  void baumWelchAlgorithm(const int iterations, const int seq_num,
-                          const char *seq_path) {
+  void baumWelchAlgorithm(const int iterations) {
     alpha.resize(obs_len * state_num);
     beta.resize(obs_len * state_num);
     gamma.resize(obs_len * state_num);
@@ -30,50 +31,45 @@ struct HiddenMarkovModel : HMM {
     accGammaObs.resize(state_num * observ_num);
     accGamma0.resize(state_num);
 
-    char sequences[seq_num][obs_len + 1];
-    FILE *seqFile = open_or_die(seq_path, "r");
-    fread(sequences, 1, sizeof(sequences), seqFile);
-    fclose(seqFile);
-
     for (int i = 0; i < iterations; ++i) {
-      std::fill(accGamma.begin(), accGamma.end(), 0);
-      std::fill(accEpsilon.begin(), accEpsilon.end(), 0);
-      std::fill(accGammaObs.begin(), accGammaObs.end(), 0);
-      std::fill(accGamma0.begin(), accGamma0.end(), 0);
       for (int j = 0; j < seq_num; ++j) {
         // Reset gamma and epsilon
         std::fill(gamma.begin(), gamma.end(), 0);
         std::fill(epsilon.begin(), epsilon.end(), 0);
         // Compute alpha and beta
-        forward(sequences[j]);
-        backward(sequences[j]);
+        forward(&sequences[j * (obs_len + 1)]);
+        backward(&sequences[j * (obs_len + 1)]);
         // Compute gamma and epsilon
         updateGamma();
-        updateEpsilon(sequences[j]);
+        updateEpsilon(&sequences[j * (obs_len + 1)]);
         // Accumulate gamma and epsilon
-        std::transform(gamma.begin(), gamma.end(), accGamma.begin(),
-                       accGamma.begin(), std::plus<double>());
-        std::transform(gamma.begin(), gamma.begin() + state_num,
-                       accGamma0.begin(), accGamma0.begin(),
-                       std::plus<double>());
+        for (int t = 0; t < obs_len; ++t)
+          for (int i = 0; i < state_num; ++i)
+            accGamma[ind(t, i, state_num)] += gamma[ind(t, i, state_num)];
+        for (int i = 0; i < state_num; ++i)
+          accGamma0[i] += gamma[i];
         for (int k = 0; k < state_num; ++k)
           for (int t = 0; t < obs_len; ++t)
-            accGammaObs[ind(k, sequences[j][t] - 'A', observ_num)] +=
-                gamma[ind(t, k, state_num)];
+            accGammaObs[ind(k, sequences[ind(j, t, (obs_len + 1))] - 'A',
+                            observ_num)] += gamma[ind(t, k, state_num)];
         for (int t = 0; t < obs_len - 1; ++t)
           for (int i = 0; i < state_num; ++i)
             for (int j = 0; j < state_num; ++j)
               accEpsilon[ind(i, j, state_num)] +=
                   epsilon[ind(ind(t, i, state_num), j, state_num)];
       }
-      updateParam(seq_num);
+      updateParam();
+      std::fill(accGamma.begin(), accGamma.end(), 0);
+      std::fill(accEpsilon.begin(), accEpsilon.end(), 0);
+      std::fill(accGammaObs.begin(), accGammaObs.end(), 0);
+      std::fill(accGamma0.begin(), accGamma0.end(), 0);
     }
   }
 
   void forward(const char *obs) const {
     // Initialization: alpha_0(state) = pi_state * b_state(observation_0)
-    std::transform(initial, initial + state_num, observation[obs[0] - 'A'],
-                   alpha.begin(), std::multiplies<double>());
+    for (int i = 0; i < state_num; ++i)
+      alpha[i] = initial[i] * observation[obs[0] - 'A'][i];
     // Induction: alpha_t(cur) = [ \sum_{pre} alpha_{t-1}(pre) * a_{pre}{cur} ]
     // * b_{pre}(O_t)
     for (int t = 1; t < obs_len; ++t)
@@ -100,26 +96,26 @@ struct HiddenMarkovModel : HMM {
       }
   }
 
+  double prepareDelta() const { delta.resize(obs_len * state_num); }
+
   double viterbiAlgorithm(const char *obs) const {
-    delta.resize(obs_len * state_num);
+    // assume delta.size() is (obs_len * state_num);
     // Initialization: delta_0(i) = pi_i * b_i(O_0)
-    std::transform(initial, initial + state_num, observation[obs[0] - 'A'],
-                   delta.begin(), std::multiplies<double>());
+    for (int i = 0; i < state_num; ++i)
+      delta[i] = initial[i] * observation[obs[0] - 'A'][i];
     // Reduction
     for (int t = 0; t < obs_len - 1; ++t)
       for (int j = 0; j < state_num; ++j) {
-        double max = 0, temp = 0;
-        for (int i = 0; i < state_num; ++i) {
-          temp = delta[ind(t, i, state_num)] * transition[i][j];
-          if (temp > max)
-            max = temp;
-        }
+        double max = 0;
+        for (int i = 0; i < state_num; ++i)
+          max = std::max(max, delta[ind(t, i, state_num)] * transition[i][j]);
         delta[ind(t + 1, j, state_num)] =
             max * observation[obs[t + 1] - 'A'][j];
       }
 
     // Termination
-    return *std::max(delta.begin() + (obs_len - 1) * state_num, delta.end());
+    return *std::max_element(delta.begin() + (obs_len - 1) * state_num,
+                             delta.end());
   }
 
   void updateGamma() const {
@@ -157,7 +153,7 @@ struct HiddenMarkovModel : HMM {
     }
   }
 
-  void updateParam(const int seq_num) {
+  void updateParam() {
     // update pi
     for (int i = 0; i < state_num; ++i)
       initial[i] = accGamma0[i] / seq_num;
@@ -180,6 +176,21 @@ struct HiddenMarkovModel : HMM {
       for (int k = 0; k < observ_num; ++k)
         observation[k][j] = accGammaObs[ind(j, k, observ_num)] / gammaSum;
     }
+  }
+
+  void readObservations(const char *seq_path) {
+    std::ifstream ifs(seq_path, std::ifstream::in | std::ifstream::binary);
+    if (!ifs) {
+      perror(seq_path);
+      exit(1);
+      return;
+    }
+    ifs.seekg(0, std::ifstream::end);
+    std::streampos size = ifs.tellg();
+    sequences.resize(size);
+    ifs.seekg(0, std::ifstream::beg);
+    ifs.read(sequences.data(), size);
+    seq_num = size / (obs_len + 1); // +1 for \n
   }
 
   void loadParam(const char *filename) { loadHMM(this, filename); }

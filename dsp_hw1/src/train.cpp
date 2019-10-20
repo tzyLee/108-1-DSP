@@ -14,7 +14,8 @@ int main(int argc, char *argv[]) {
 
   HiddenMarkovModel model(50);
   model.loadParam(model_init_path);
-  model.baumWelchAlgorithm(iteration, 10000, seq_path);
+  model.readObservations(seq_path);
+  model.baumWelchAlgorithm(iteration);
   model.dumpParam(output_model_path);
   model.release();
   return 0;

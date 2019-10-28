@@ -27,7 +27,7 @@ while it <= MAX:
         p.wait()
     last_out_files = out_files
 
-    with open('model_names.txt', 'w+') as f:
+    with open('model_names.txt', 'w+', newline='\n') as f:
         for path in last_out_files:
             f.write(path)
             f.write('\n')

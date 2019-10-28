@@ -96,7 +96,7 @@ struct HiddenMarkovModel : HMM {
       }
   }
 
-  double prepareDelta() const { delta.resize(obs_len * state_num); }
+  void prepareDelta() const { delta.resize(obs_len * state_num); }
 
   double viterbiAlgorithm(const char *obs) const {
     // assume delta.size() is (obs_len * state_num);

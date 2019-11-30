@@ -1,7 +1,8 @@
+#include <cstring>
 #include <iostream>
 
 struct Big5Char {
-  unsigned char value[3]; // use additional char to store \0
+  unsigned char value[4]; // use additional char to store \0
 
   bool isZhuYin() const {
     // ZhuYin range: [0xA374, 0xA37E] union [0xA3A1, 0xA3BA]
@@ -11,6 +12,15 @@ struct Big5Char {
 
   bool operator==(const Big5Char &other) const {
     return value[0] == other.value[0] && value[1] == other.value[1];
+  }
+
+  void setChar(const char *src) {
+    strncpy(reinterpret_cast<char *>(value), src, 2);
+    value[2] = 0;
+  }
+
+  void setValue(const char *src) {
+    strncpy(reinterpret_cast<char *>(value), src, 4);
   }
 
   operator const char *() const {

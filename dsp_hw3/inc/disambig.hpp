@@ -72,9 +72,7 @@ struct Disambig {
         delta[i].emplace_back(c);
       } else {
         auto &observations = map[c];
-        delta[i].reserve(observations.size());
-        for (const Big5Char &obs : observations)
-          delta[i].emplace_back(obs);
+        delta[i] = {observations.begin(), observations.end()};
       }
       ++i;
     }
@@ -90,17 +88,16 @@ struct Disambig {
     VocabIndex context[_order];
     context[_order - 1] = Vocab_None;
     // Induction
-    for (int j = 1; j < delta.size(); ++j)
-      for (Node &cur : delta[j]) {
-        auto &prevNodes = delta[j - 1];
-        for (int i = 0; i < prevNodes.size(); ++i) {
-          context[0] = index(prevNodes[i].character);
-          LogP logProb =
-              prevNodes[i].logProb + lm.wordProb(index(cur.character), context);
-          if (logProb > cur.logProb) {
+    for (int i = 1; i < delta.size(); ++i)
+      for (int j = 0; j < delta[i].size(); ++j) {
+        for (int k = 0; k < delta[i - 1].size(); ++k) {
+          context[0] = index(delta[i - 1][k].character);
+          LogP logProb = delta[i - 1][k].logProb +
+                         lm.wordProb(index(delta[i][j].character), context);
+          if (logProb > delta[i][j].logProb) {
             // Use the path with max probability
-            cur.logProb = logProb;
-            cur.prev = i; // for backtrack
+            delta[i][j].logProb = logProb;
+            delta[i][j].prev = k; // for backtrack
           }
         }
       }
